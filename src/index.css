@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", serif;
+  --font-sans: "Inter", sans-serif;
+}
+
+:root {
+  --bg: #0B1F1A;
+  --surface: #12352B;
+  --surface-secondary: #17483A;
+  --text: #F5F0E6;
+  --text-muted: #B8C8C0;
+  --border: #285044;
+  --surface-text: #F5F0E6;
+  --surface-text-muted: #B8C8C0;
+  --surface-border: #285044;
+  --input-bg: #102A23;
+  --accent: #D6B36A;
+  --accent-tint: rgba(214, 179, 106, 0.15);
+  --accent-green: #7FAF8C;
+  --nav-active: #F5F0E6;
+  --nav-inactive: #789087;
+  --error: #D97878;
+  --success: #7FAF8C;
+  --activity-bg: #E9E2D0;
+  --activity-text: #2A2418;
+  --activity-text-muted: #6B6250;
+}
+
+.dark {
+  --bg: #0B1F1A;
+  --surface: #12352B;
+  --surface-secondary: #17483A;
+  --text: #F5F0E6;
+  --text-muted: #B8C8C0;
+  --border: #285044;
+  --surface-text: #F5F0E6;
+  --surface-text-muted: #B8C8C0;
+  --surface-border: #285044;
+  --input-bg: #102A23;
+  --accent: #D6B36A;
+  --accent-tint: rgba(214, 179, 106, 0.15);
+  --accent-green: #7FAF8C;
+  --nav-active: #F5F0E6;
+  --nav-inactive: #789087;
+  --error: #D97878;
+  --success: #7FAF8C;
+  --activity-bg: #E9E2D0;
+  --activity-text: #2A2418;
+  --activity-text-muted: #6B6250;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
