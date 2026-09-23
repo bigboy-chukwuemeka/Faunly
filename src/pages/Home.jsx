@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, Image as ImageIcon, MessageCircle, HeartPulse, PawPrint, Clock, Settings, Bird, Sparkles, Leaf, User, ChevronRight } from 'lucide-react'
+import { Camera, Image as ImageIcon, MessageCircle, HeartPulse, PawPrint, Clock, Settings, Bird, Sparkles, Leaf, User, ChevronRight, Bell } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { listAnimals } from '../lib/animalsApi'
 import { listIdentifications, listConversations } from '../lib/historyApi'
@@ -193,6 +193,7 @@ export default function Home() {
         <QuickCard icon={<HeartPulse size={20} />} title="Animal Health" subtitle="Care tips & guidance" onClick={() => navigate('/identify')} />
         <QuickCard icon={<PawPrint size={20} />} title="My Animals" subtitle="Your saved animals" onClick={() => navigate('/my-animals')} />
         <QuickCard icon={<Clock size={20} />} title="History" subtitle="Past searches & chats" onClick={() => navigate('/history')} />
+        <QuickCard icon={<Bell size={20} />} title="Reminders" subtitle="Vaccines, meds & check-ups" onClick={() => navigate('/reminders')} className="col-span-2" />
       </div>
 
       <div className="px-6 mb-8">
@@ -258,11 +259,11 @@ export default function Home() {
   )
 }
 
-function QuickCard({ icon, title, subtitle, onClick }) {
+function QuickCard({ icon, title, subtitle, onClick, className = '' }) {
   return (
     <button
       onClick={onClick}
-      className="bg-[var(--surface-secondary)] border border-[var(--border)] rounded-2xl p-4 text-left"
+      className={`bg-[var(--surface-secondary)] border border-[var(--border)] rounded-2xl p-4 text-left ${className}`}
     >
       <div className="w-10 h-10 rounded-full bg-[var(--accent-tint)] flex items-center justify-center mb-3 text-[var(--accent)]">
         {icon}

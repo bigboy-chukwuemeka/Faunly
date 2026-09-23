@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, PawPrint, MessageCircle, Pencil, Trash2, HeartPulse, Plus, Stethoscope, Syringe, Pill, FileText, X } from 'lucide-react'
+import { ArrowLeft, PawPrint, MessageCircle, Pencil, Trash2, HeartPulse, Plus, Stethoscope, Syringe, Pill, FileText, X, Bell, ChevronRight } from 'lucide-react'
 import { getAnimal, deleteAnimal } from '../lib/animalsApi'
 import { listHealthRecords, deleteHealthRecord } from '../lib/healthRecordsApi'
+import { listReminders } from '../lib/remindersApi'
 import BottomNav from '../components/BottomNav'
 
 const STATUS_STYLE = {
@@ -27,6 +28,29 @@ const RECORD_LABEL = {
   note: 'Note',
 }
 
+const REMINDER_ICON = {
+  vaccination: <Syringe size={16} />,
+  medication: <Pill size={16} />,
+  vet_visit: <Stethoscope size={16} />,
+  follow_up: <Bell size={16} />,
+  weight_check: <PawPrint size={16} />,
+  custom: <Bell size={16} />,
+}
+
+function reminderDaysUntil(dateStr) {
+  const due = new Date(dateStr)
+  const now = new Date()
+  return Math.ceil((due - now) / (1000 * 60 * 60 * 24))
+}
+
+function reminderDateLabel(dateStr) {
+  const days = reminderDaysUntil(dateStr)
+  if (days < 0) return 'Overdue'
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  return `In ${days} days`
+}
+
 export default function AnimalProfile() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -36,6 +60,8 @@ export default function AnimalProfile() {
   const [tab, setTab] = useState(location.state?.tab || 'overview')
   const [healthRecords, setHealthRecords] = useState([])
   const [loadingRecords, setLoadingRecords] = useState(true)
+  const [reminders, setReminders] = useState([])
+  const [loadingReminders, setLoadingReminders] = useState(true)
 
   useEffect(() => {
     getAnimal(id).then((res) => {
@@ -50,6 +76,12 @@ export default function AnimalProfile() {
       listHealthRecords(id).then((res) => {
         if (res.records) setHealthRecords(res.records)
         setLoadingRecords(false)
+      })
+
+      setLoadingReminders(true)
+      listReminders({ animal_id: id, status: 'pending' }).then((res) => {
+        if (res.reminders) setReminders(res.reminders)
+        setLoadingReminders(false)
       })
     }
   }, [tab, id])
@@ -173,6 +205,46 @@ export default function AnimalProfile() {
               >
                 <Plus size={16} /> Add Record
               </button>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-medium">Reminders</h3>
+                <button
+                  onClick={() => navigate('/reminders/add', { state: { animal_id: id } })}
+                  className="text-xs font-medium text-[var(--accent)] flex items-center gap-1"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </div>
+              {loadingReminders ? (
+                <p className="text-sm text-[var(--text-muted)]">Loading...</p>
+              ) : reminders.length === 0 ? (
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 text-center">
+                  <p className="text-sm text-[var(--surface-text-muted)]">
+                    No upcoming reminders for {animal.name}.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {reminders.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => navigate(`/reminders/${r.id}`)}
+                      className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-3.5 flex items-center gap-3 text-left"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-[var(--accent-tint)] text-[var(--accent)] flex items-center justify-center flex-shrink-0">
+                        {REMINDER_ICON[r.reminder_type] || <Bell size={16} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-[var(--surface-text)] truncate">{r.title}</p>
+                        <p className="text-xs text-[var(--surface-text-muted)]">{reminderDateLabel(r.due_at)}</p>
+                      </div>
+                      <ChevronRight size={16} className="text-[var(--surface-text-muted)] flex-shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>

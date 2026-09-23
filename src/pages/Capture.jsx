@@ -28,6 +28,66 @@ const TIPS = [
   'Avoid blurry or dark images',
 ]
 
+const MAX_IMAGE_DIMENSION = 1024
+const IMAGE_QUALITY = 0.85
+const REQUEST_TIMEOUT_MS = 20000
+
+function resizeImage(file, maxDimension = MAX_IMAGE_DIMENSION, quality = IMAGE_QUALITY) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+
+    img.onload = () => {
+      let { width, height } = img
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width)
+          width = maxDimension
+        } else {
+          width = Math.round((width * maxDimension) / height)
+          height = maxDimension
+        }
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, width, height)
+
+      URL.revokeObjectURL(objectUrl)
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('Could not process image'))
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      reject(new Error('Could not load image'))
+    }
+
+    img.src = objectUrl
+  })
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export default function Capture() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -65,54 +125,86 @@ export default function Capture() {
     }
   }, [location.state])
 
-  async function identifyFromBase64(base64, mimeType) {
-    try {
-      const authHeader = await getAuthHeader()
-      const res = await fetch(
-        'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': authHeader,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            task: 'identify',
-            guest_session_id: getGuestSessionId(),
-            image_base64: base64,
-            mime_type: mimeType,
-          }),
-        }
-      )
-      const data = await res.json()
+  async function attemptIdentify(base64, mimeType) {
+    const authHeader = await getAuthHeader()
+    const res = await fetchWithTimeout(
+      'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task: 'identify',
+          guest_session_id: getGuestSessionId(),
+          image_base64: base64,
+          mime_type: mimeType,
+        }),
+      },
+      REQUEST_TIMEOUT_MS
+    )
+    const data = await res.json()
+    return { res, data }
+  }
 
-      if (data.error === 'guest_limit_reached') {
-        setLimitReached(true)
+  async function identifyFromBase64(base64, mimeType) {
+    let attempt
+    try {
+      attempt = await attemptIdentify(base64, mimeType)
+    } catch (err) {
+      // network error, timeout, or abort on first attempt — retry once, invisibly
+      try {
+        attempt = await attemptIdentify(base64, mimeType)
+      } catch (err2) {
+        setErrorMsg('We had trouble reaching Faunly. Please check your connection and try again.')
         setStatus('error')
         return
       }
+    }
 
-      if (!res.ok || data.error) {
+    const { res, data } = attempt
+
+    if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
+      setLimitReached(true)
+      setErrorMsg(data.message || '')
+      setStatus('error')
+      return
+    }
+
+    if (!res.ok || data.error) {
+      // one invisible retry for a server-side hiccup before showing the user anything
+      try {
+        const retryAttempt = await attemptIdentify(base64, mimeType)
+        if (retryAttempt.res.ok && !retryAttempt.data.error) {
+          if (retryAttempt.data.identification.is_animal === false) {
+            setStatus('uncertain')
+            return
+          }
+          setResult(retryAttempt.data.identification)
+          setStatus('done')
+          return
+        }
+        setErrorMsg(retryAttempt.data.error || 'Something went wrong')
+        setStatus('error')
+        return
+      } catch {
         setErrorMsg(data.error || 'Something went wrong')
         setStatus('error')
         return
       }
-
-      if (data.identification.is_animal === false) {
-        setStatus('uncertain')
-        return
-      }
-
-      setResult(data.identification)
-      setStatus('done')
-    } catch (err) {
-      setErrorMsg(err.message)
-      setStatus('error')
     }
+
+    if (data.identification.is_animal === false) {
+      setStatus('uncertain')
+      return
+    }
+
+    setResult(data.identification)
+    setStatus('done')
   }
 
   async function processFile(file) {
-    setImagePreview(URL.createObjectURL(file))
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
@@ -120,11 +212,21 @@ export default function Capture() {
     setSaved(false)
     setExpanded(null)
 
-    const base64 = await fileToBase64(file)
-    setImageBase64(base64)
-    setImageMimeType(file.type)
+    let workingFile = file
+    try {
+      workingFile = await resizeImage(file)
+    } catch {
+      workingFile = file
+    }
 
-    await identifyFromBase64(base64, file.type)
+    setImagePreview(URL.createObjectURL(workingFile))
+
+    const mimeType = workingFile.type || 'image/jpeg'
+    const base64 = await fileToBase64(workingFile)
+    setImageBase64(base64)
+    setImageMimeType(mimeType)
+
+    await identifyFromBase64(base64, mimeType)
   }
 
   function handleFileChange(e) {
@@ -295,7 +397,7 @@ export default function Capture() {
       {status === 'error' && limitReached && (
         <div className="px-6 mt-8">
           <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-6 max-w-sm mx-auto text-center">
-            <p className="mb-4">You have used your free tries. Create an account to keep exploring with Faunly.</p>
+            <p className="mb-4">{errorMsg || 'You have used your free tries. Create an account to keep exploring with Faunly.'}</p>
             <button
               onClick={() => navigate('/auth')}
               className="bg-[var(--accent)] text-[var(--bg)] font-medium px-6 py-3 rounded-full w-full"

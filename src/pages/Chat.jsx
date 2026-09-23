@@ -18,6 +18,8 @@ const NAV_ITEMS = [
   { to: '/profile', label: 'Profile', icon: User },
 ]
 
+const REQUEST_TIMEOUT_MS = 20000
+
 function suggestionsFor(animal) {
   return [
     `What does it eat?`,
@@ -42,6 +44,17 @@ function fileToBase64(file) {
   })
 }
 
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export default function Chat() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -56,6 +69,7 @@ export default function Chat() {
   const [pendingImagePreview, setPendingImagePreview] = useState(null)
   const [sending, setSending] = useState(false)
   const [limitReached, setLimitReached] = useState(false)
+  const [limitMessage, setLimitMessage] = useState('')
   const [conversationId, setConversationId] = useState(null)
   const bottomRef = useRef(null)
 
@@ -87,6 +101,30 @@ export default function Chat() {
     setPendingImagePreview(null)
   }
 
+  async function attemptChat(newMessages) {
+    const authHeader = await getAuthHeader()
+    const res = await fetchWithTimeout(
+      'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task: 'chat',
+          guest_session_id: getGuestSessionId(),
+          animal,
+          messages: newMessages.map(({ imagePreview, ...m }) => m),
+          conversation_id: conversationId,
+        }),
+      },
+      REQUEST_TIMEOUT_MS
+    )
+    const data = await res.json()
+    return { res, data }
+  }
+
   async function sendMessage(overrideText) {
     const trimmed = (overrideText ?? input).trim()
     if ((!trimmed && !pendingImage) || sending || limitReached) return
@@ -104,44 +142,50 @@ export default function Chat() {
     clearPendingImage()
     setSending(true)
 
+    let attempt
     try {
-      const authHeader = await getAuthHeader()
-      const res = await fetch(
-        'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': authHeader,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            task: 'chat',
-            guest_session_id: getGuestSessionId(),
-            animal,
-            messages: newMessages.map(({ imagePreview, ...m }) => m),
-            conversation_id: conversationId,
-          }),
-        }
-      )
-      const data = await res.json()
-
-      if (data.error === 'guest_limit_reached') {
-        setLimitReached(true)
+      attempt = await attemptChat(newMessages)
+    } catch {
+      // network error or timeout on first try — retry once, invisibly
+      try {
+        attempt = await attemptChat(newMessages)
+      } catch {
+        setMessages([...newMessages, { role: 'assistant', content: '⚠️ We had trouble reaching Faunly. Please check your connection and try again.' }])
         setSending(false)
         return
       }
-
-      if (!res.ok || data.error) {
-        setMessages([...newMessages, { role: 'assistant', content: '⚠️ Something went wrong. Try again?' }])
-      } else {
-        setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
-        if (data.conversation_id) setConversationId(data.conversation_id)
-      }
-    } catch {
-      setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Try again?' }])
-    } finally {
-      setSending(false)
     }
+
+    const { res, data } = attempt
+
+    if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
+      setLimitReached(true)
+      setLimitMessage(data.message || '')
+      setSending(false)
+      return
+    }
+
+    if (!res.ok || data.error) {
+      // one invisible retry for a server-side hiccup before showing the user anything
+      try {
+        const retry = await attemptChat(newMessages)
+        if (retry.res.ok && !retry.data.error) {
+          setMessages([...newMessages, { role: 'assistant', content: retry.data.reply, safety: retry.data.safety }])
+          if (retry.data.conversation_id) setConversationId(retry.data.conversation_id)
+          setSending(false)
+          return
+        }
+        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${retry.data.error || 'Something went wrong. Try again?'}` }])
+      } catch {
+        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${data.error || 'Something went wrong. Try again?'}` }])
+      }
+      setSending(false)
+      return
+    }
+
+    setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
+    if (data.conversation_id) setConversationId(data.conversation_id)
+    setSending(false)
   }
 
   const showSuggestions = messages.length <= 1 && !sending
@@ -234,7 +278,7 @@ export default function Chat() {
 
           {limitReached && (
             <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-4 text-center">
-              <p className="mb-3">You have used your free tries. Create an account to keep chatting.</p>
+              <p className="mb-3">{limitMessage || 'You have used your free tries. Create an account to keep chatting.'}</p>
               <button
                 onClick={() => navigate('/auth')}
                 className="bg-[var(--accent)] text-[var(--bg)] font-medium px-6 py-2 rounded-full"
