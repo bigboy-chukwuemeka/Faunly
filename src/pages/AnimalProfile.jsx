@@ -158,7 +158,7 @@ export default function AnimalProfile() {
         </p>
       </div>
 
-      <div className="px-6 mb-5 flex bg-[var(--surface-secondary)] border border-[var(--border)] rounded-full p-1">
+      <div className="mx-6 mb-5 flex bg-[var(--surface-secondary)] border border-[var(--border)] rounded-full p-1">
         {['overview', 'health', 'history', 'more'].map((t) => (
           <button
             key={t}

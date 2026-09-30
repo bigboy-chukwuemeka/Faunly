@@ -30,7 +30,7 @@ const TIPS = [
 
 const MAX_IMAGE_DIMENSION = 1024
 const IMAGE_QUALITY = 0.85
-const REQUEST_TIMEOUT_MS = 20000
+const REQUEST_TIMEOUT_MS = 45000
 
 function resizeImage(file, maxDimension = MAX_IMAGE_DIMENSION, quality = IMAGE_QUALITY) {
   return new Promise((resolve, reject) => {
@@ -94,7 +94,9 @@ export default function Capture() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [errorStatus, setErrorStatus] = useState(null)
   const [limitReached, setLimitReached] = useState(false)
+  const [limitKind, setLimitKind] = useState(null) // 'guest' | 'daily'
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0)
   const [imagePreview, setImagePreview] = useState(null)
   const [imageBase64, setImageBase64] = useState(null)
@@ -148,51 +150,40 @@ export default function Capture() {
     return { res, data }
   }
 
+  // Single attempt only. If it fails for any reason (network error, timeout,
+  // or a clean error response from the server), we surface that to the user
+  // and let them choose to retry manually via retryIdentification() — we
+  // never fire a second real request automatically. Aborting the client
+  // fetch on timeout does not stop the server from finishing the job, so an
+  // automatic retry here would risk a duplicate Gemini call and a duplicate
+  // credit deduction for one user action.
   async function identifyFromBase64(base64, mimeType) {
+    setErrorStatus(null)
+
     let attempt
     try {
       attempt = await attemptIdentify(base64, mimeType)
-    } catch (err) {
-      // network error, timeout, or abort on first attempt — retry once, invisibly
-      try {
-        attempt = await attemptIdentify(base64, mimeType)
-      } catch (err2) {
-        setErrorMsg('We had trouble reaching Faunly. Please check your connection and try again.')
-        setStatus('error')
-        return
-      }
+    } catch {
+      setErrorMsg('We had trouble reaching Faunly. Please check your connection and try again.')
+      setStatus('error')
+      return
     }
 
     const { res, data } = attempt
 
     if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
       setLimitReached(true)
+      setLimitKind(data.error === 'daily_limit_reached' ? 'daily' : 'guest')
       setErrorMsg(data.message || '')
       setStatus('error')
       return
     }
 
     if (!res.ok || data.error) {
-      // one invisible retry for a server-side hiccup before showing the user anything
-      try {
-        const retryAttempt = await attemptIdentify(base64, mimeType)
-        if (retryAttempt.res.ok && !retryAttempt.data.error) {
-          if (retryAttempt.data.identification.is_animal === false) {
-            setStatus('uncertain')
-            return
-          }
-          setResult(retryAttempt.data.identification)
-          setStatus('done')
-          return
-        }
-        setErrorMsg(retryAttempt.data.error || 'Something went wrong')
-        setStatus('error')
-        return
-      } catch {
-        setErrorMsg(data.error || 'Something went wrong')
-        setStatus('error')
-        return
-      }
+      setErrorMsg(data.error || 'Something went wrong. Please try again.')
+      setErrorStatus(res.status)
+      setStatus('error')
+      return
     }
 
     if (data.identification.is_animal === false) {
@@ -208,7 +199,9 @@ export default function Capture() {
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
+    setErrorStatus(null)
     setLimitReached(false)
+    setLimitKind(null)
     setSaved(false)
     setExpanded(null)
 
@@ -306,6 +299,7 @@ export default function Capture() {
 
   const confidenceStyle = result ? CONFIDENCE_STYLE[result.confidence] || CONFIDENCE_STYLE.medium : null
   const hasLowConfidenceAlternatives = result?.confidence !== 'high' && result?.alternatives?.length > 0
+  const isQuotaError = errorStatus === 429
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] pb-24">
@@ -394,7 +388,7 @@ export default function Capture() {
         </div>
       )}
 
-      {status === 'error' && limitReached && (
+      {status === 'error' && limitReached && limitKind === 'guest' && (
         <div className="px-6 mt-8">
           <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-6 max-w-sm mx-auto text-center">
             <p className="mb-4">{errorMsg || 'You have used your free tries. Create an account to keep exploring with Faunly.'}</p>
@@ -408,12 +402,36 @@ export default function Capture() {
         </div>
       )}
 
+      {status === 'error' && limitReached && limitKind === 'daily' && (
+        <div className="px-6 mt-8">
+          <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-6 max-w-sm mx-auto text-center">
+            <p className="mb-4">{errorMsg || 'You have reached your daily AI limit. It resets in 24 hours.'}</p>
+            <button
+              onClick={() => navigate('/')}
+              className="border border-[var(--border)] text-[var(--surface-text)] font-medium px-6 py-3 rounded-full w-full"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      )}
+
       {status === 'error' && !limitReached && (
         <div className="px-6 mt-8 text-center">
           <p className="text-[var(--error)] mb-4">⚠️ {errorMsg}</p>
-          <button onClick={resetToIdle} className="border border-[var(--border)] rounded-full px-6 py-2">
-            Try again
-          </button>
+          <div className="flex flex-col gap-3 max-w-xs mx-auto">
+            {!isQuotaError && (
+              <button
+                onClick={retryIdentification}
+                className="flex items-center justify-center gap-2 bg-[var(--accent)] text-[var(--bg)] font-medium rounded-full px-6 py-3"
+              >
+                <RefreshCw size={16} /> Try Again
+              </button>
+            )}
+            <button onClick={resetToIdle} className="border border-[var(--border)] rounded-full px-6 py-2">
+              {isQuotaError ? 'Back to Home' : 'Choose a Different Photo'}
+            </button>
+          </div>
         </div>
       )}
 

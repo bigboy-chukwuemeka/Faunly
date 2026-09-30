@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, NavLink } from 'react-router-dom'
-import { ArrowLeft, Send, Home, Camera, PawPrint, Clock, User, ImagePlus, X } from 'lucide-react'
+import { ArrowLeft, Send, Home, Camera, PawPrint, Clock, User, ImagePlus, X, RefreshCw } from 'lucide-react'
 import { getConversation } from '../lib/historyApi'
 import { getGuestSessionId } from '../lib/guestSession'
 import { getAuthHeader } from '../lib/auth'
@@ -19,6 +19,8 @@ const NAV_ITEMS = [
   { to: '/profile', label: 'Profile', icon: User },
 ]
 
+const REQUEST_TIMEOUT_MS = 45000
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -26,6 +28,17 @@ function fileToBase64(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 export default function ConversationView() {
@@ -39,6 +52,11 @@ export default function ConversationView() {
   const [pendingImagePreview, setPendingImagePreview] = useState(null)
   const [sending, setSending] = useState(false)
   const [limitReached, setLimitReached] = useState(false)
+  const [limitKind, setLimitKind] = useState(null) // 'guest' | 'daily'
+  const [limitMessage, setLimitMessage] = useState('')
+  // Holds the exact message array that failed to send, so "Try Again" can
+  // replay it verbatim instead of the user having to retype anything.
+  const [pendingRetry, setPendingRetry] = useState(null)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -68,6 +86,79 @@ export default function ConversationView() {
     setPendingImagePreview(null)
   }
 
+  async function attemptChat(newMessages) {
+    const authHeader = await getAuthHeader()
+    const res = await fetchWithTimeout(
+      'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task: 'chat',
+          guest_session_id: getGuestSessionId(),
+          animal: { common_name: conversation.title, facts: {} },
+          messages: newMessages.map(({ imagePreview, isError, ...m }) => m),
+          conversation_id: id,
+        }),
+      },
+      REQUEST_TIMEOUT_MS
+    )
+    const data = await res.json()
+    return { res, data }
+  }
+
+  // Single attempt only, same reasoning as Chat.jsx: no automatic retry,
+  // since aborting the client fetch does not stop the server from
+  // finishing the job, so retrying automatically risks a duplicate Gemini
+  // call and a duplicate credit deduction. Failures are surfaced with a
+  // manual "Try Again" that replays the exact same message array.
+  async function performSend(newMessages) {
+    setSending(true)
+    setPendingRetry(null)
+
+    let attempt
+    try {
+      attempt = await attemptChat(newMessages)
+    } catch {
+      setMessages([...newMessages, {
+        role: 'assistant',
+        content: '⚠️ We had trouble reaching Faunly. Please check your connection and try again.',
+        isError: true,
+      }])
+      setPendingRetry(newMessages)
+      setSending(false)
+      return
+    }
+
+    const { res, data } = attempt
+
+    if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
+      setLimitReached(true)
+      setLimitKind(data.error === 'daily_limit_reached' ? 'daily' : 'guest')
+      setLimitMessage(data.message || '')
+      setSending(false)
+      return
+    }
+
+    if (!res.ok || data.error) {
+      const isQuotaError = res.status === 429
+      setMessages([...newMessages, {
+        role: 'assistant',
+        content: `⚠️ ${data.error || 'Something went wrong. Try again?'}`,
+        isError: true,
+      }])
+      if (!isQuotaError) setPendingRetry(newMessages)
+      setSending(false)
+      return
+    }
+
+    setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
+    setSending(false)
+  }
+
   async function sendMessage() {
     const trimmed = input.trim()
     if ((!trimmed && !pendingImage) || sending || limitReached) return
@@ -83,45 +174,14 @@ export default function ConversationView() {
     setMessages(newMessages)
     setInput('')
     clearPendingImage()
-    setSending(true)
 
-    try {
-      const authHeader = await getAuthHeader()
-      const res = await fetch(
-        'https://wlgjtfqgmfgbhmjmsadr.supabase.co/functions/v1/super-service',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': authHeader,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            task: 'chat',
-            guest_session_id: getGuestSessionId(),
-            animal: { common_name: conversation.title, facts: {} },
-            messages: newMessages.map(({ imagePreview, ...m }) => m),
-            conversation_id: id,
-          }),
-        }
-      )
-      const data = await res.json()
+    await performSend(newMessages)
+  }
 
-      if (data.error === 'guest_limit_reached') {
-        setLimitReached(true)
-        setSending(false)
-        return
-      }
-
-      if (!res.ok || data.error) {
-        setMessages([...newMessages, { role: 'assistant', content: '⚠️ Something went wrong. Try again?' }])
-      } else {
-        setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
-      }
-    } catch {
-      setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Try again?' }])
-    } finally {
-      setSending(false)
-    }
+  function retryLastMessage() {
+    if (!pendingRetry || sending) return
+    setMessages((prev) => prev.filter((m) => !m.isError))
+    performSend(pendingRetry)
   }
 
   if (loading) {
@@ -176,14 +236,35 @@ export default function ConversationView() {
           </div>
         )}
 
-        {limitReached && (
+        {pendingRetry && !sending && (
+          <button
+            onClick={retryLastMessage}
+            className="flex items-center gap-2 text-sm bg-[var(--surface-secondary)] border border-[var(--border)] text-[var(--surface-text)] px-4 py-2 rounded-full"
+          >
+            <RefreshCw size={14} /> Try Again
+          </button>
+        )}
+
+        {limitReached && limitKind === 'guest' && (
           <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-4 text-center">
-            <p className="mb-3">You have used your free tries. Create an account to keep chatting.</p>
+            <p className="mb-3">{limitMessage || 'You have used your free tries. Create an account to keep chatting.'}</p>
             <button
               onClick={() => navigate('/auth')}
               className="bg-[var(--accent)] text-[var(--bg)] font-medium px-6 py-2 rounded-full"
             >
               Sign up
+            </button>
+          </div>
+        )}
+
+        {limitReached && limitKind === 'daily' && (
+          <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-4 text-center">
+            <p className="mb-3">{limitMessage || 'You have reached your daily AI limit. It resets in 24 hours.'}</p>
+            <button
+              onClick={() => navigate('/')}
+              className="border border-[var(--border)] text-[var(--surface-text)] font-medium px-6 py-2 rounded-full"
+            >
+              Back to Home
             </button>
           </div>
         )}

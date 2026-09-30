@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate, NavLink } from 'react-router-dom'
-import { ArrowLeft, Leaf, Send, Info, MapPin, Heart, Home, Camera, PawPrint, Clock, User, ImagePlus, X } from 'lucide-react'
+import { ArrowLeft, Leaf, Send, Info, MapPin, Heart, Home, Camera, PawPrint, Clock, User, ImagePlus, X, RefreshCw } from 'lucide-react'
 import { getGuestSessionId } from '../lib/guestSession'
 import { getAuthHeader } from '../lib/auth'
 
@@ -18,7 +18,7 @@ const NAV_ITEMS = [
   { to: '/profile', label: 'Profile', icon: User },
 ]
 
-const REQUEST_TIMEOUT_MS = 20000
+const REQUEST_TIMEOUT_MS = 45000
 
 function suggestionsFor(animal) {
   return [
@@ -69,8 +69,13 @@ export default function Chat() {
   const [pendingImagePreview, setPendingImagePreview] = useState(null)
   const [sending, setSending] = useState(false)
   const [limitReached, setLimitReached] = useState(false)
+  const [limitKind, setLimitKind] = useState(null) // 'guest' | 'daily'
   const [limitMessage, setLimitMessage] = useState('')
   const [conversationId, setConversationId] = useState(null)
+  // Holds the exact message array that failed to send, so "Try Again" can
+  // replay it verbatim instead of the user having to retype anything.
+  // null means there is no failed send currently pending retry.
+  const [pendingRetry, setPendingRetry] = useState(null)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -115,7 +120,7 @@ export default function Chat() {
           task: 'chat',
           guest_session_id: getGuestSessionId(),
           animal,
-          messages: newMessages.map(({ imagePreview, ...m }) => m),
+          messages: newMessages.map(({ imagePreview, isError, ...m }) => m),
           conversation_id: conversationId,
         }),
       },
@@ -123,6 +128,61 @@ export default function Chat() {
     )
     const data = await res.json()
     return { res, data }
+  }
+
+  // Single attempt only. On failure, we surface the error as a message
+  // bubble and store the exact `newMessages` array in pendingRetry so the
+  // user can retry with one tap via retryLastMessage() below, without
+  // retyping anything. We never fire a second real request automatically —
+  // aborting the client fetch on timeout does not stop the server, so an
+  // automatic retry risks a duplicate Gemini call and a duplicate credit
+  // deduction for the same message.
+  async function performSend(newMessages) {
+    setSending(true)
+    setPendingRetry(null)
+
+    let attempt
+    try {
+      attempt = await attemptChat(newMessages)
+    } catch {
+      setMessages([...newMessages, {
+        role: 'assistant',
+        content: '⚠️ We had trouble reaching Faunly. Please check your connection and try again.',
+        isError: true,
+      }])
+      setPendingRetry(newMessages)
+      setSending(false)
+      return
+    }
+
+    const { res, data } = attempt
+
+    if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
+      setLimitReached(true)
+      setLimitKind(data.error === 'daily_limit_reached' ? 'daily' : 'guest')
+      setLimitMessage(data.message || '')
+      setSending(false)
+      return
+    }
+
+    if (!res.ok || data.error) {
+      const isQuotaError = res.status === 429
+      setMessages([...newMessages, {
+        role: 'assistant',
+        content: `⚠️ ${data.error || 'Something went wrong. Try again?'}`,
+        isError: true,
+      }])
+      // A 429 means Gemini's quota is exhausted — retrying immediately
+      // would just fail again and waste another attempt, so we don't
+      // offer a retry for that case specifically.
+      if (!isQuotaError) setPendingRetry(newMessages)
+      setSending(false)
+      return
+    }
+
+    setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
+    if (data.conversation_id) setConversationId(data.conversation_id)
+    setSending(false)
   }
 
   async function sendMessage(overrideText) {
@@ -140,52 +200,16 @@ export default function Chat() {
     setMessages(newMessages)
     setInput('')
     clearPendingImage()
-    setSending(true)
 
-    let attempt
-    try {
-      attempt = await attemptChat(newMessages)
-    } catch {
-      // network error or timeout on first try — retry once, invisibly
-      try {
-        attempt = await attemptChat(newMessages)
-      } catch {
-        setMessages([...newMessages, { role: 'assistant', content: '⚠️ We had trouble reaching Faunly. Please check your connection and try again.' }])
-        setSending(false)
-        return
-      }
-    }
+    await performSend(newMessages)
+  }
 
-    const { res, data } = attempt
-
-    if (data.error === 'guest_limit_reached' || data.error === 'daily_limit_reached') {
-      setLimitReached(true)
-      setLimitMessage(data.message || '')
-      setSending(false)
-      return
-    }
-
-    if (!res.ok || data.error) {
-      // one invisible retry for a server-side hiccup before showing the user anything
-      try {
-        const retry = await attemptChat(newMessages)
-        if (retry.res.ok && !retry.data.error) {
-          setMessages([...newMessages, { role: 'assistant', content: retry.data.reply, safety: retry.data.safety }])
-          if (retry.data.conversation_id) setConversationId(retry.data.conversation_id)
-          setSending(false)
-          return
-        }
-        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${retry.data.error || 'Something went wrong. Try again?'}` }])
-      } catch {
-        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${data.error || 'Something went wrong. Try again?'}` }])
-      }
-      setSending(false)
-      return
-    }
-
-    setMessages([...newMessages, { role: 'assistant', content: data.reply, safety: data.safety }])
-    if (data.conversation_id) setConversationId(data.conversation_id)
-    setSending(false)
+  function retryLastMessage() {
+    if (!pendingRetry || sending) return
+    // Strip the error bubble we appended after the failed attempt, then
+    // resend the exact same message array that failed.
+    setMessages((prev) => prev.filter((m) => !m.isError))
+    performSend(pendingRetry)
   }
 
   const showSuggestions = messages.length <= 1 && !sending
@@ -276,7 +300,16 @@ export default function Chat() {
             </div>
           )}
 
-          {limitReached && (
+          {pendingRetry && !sending && (
+            <button
+              onClick={retryLastMessage}
+              className="flex items-center gap-2 text-sm bg-[var(--surface-secondary)] border border-[var(--border)] text-[var(--surface-text)] px-4 py-2 rounded-full"
+            >
+              <RefreshCw size={14} /> Try Again
+            </button>
+          )}
+
+          {limitReached && limitKind === 'guest' && (
             <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-4 text-center">
               <p className="mb-3">{limitMessage || 'You have used your free tries. Create an account to keep chatting.'}</p>
               <button
@@ -284,6 +317,18 @@ export default function Chat() {
                 className="bg-[var(--accent)] text-[var(--bg)] font-medium px-6 py-2 rounded-full"
               >
                 Sign up
+              </button>
+            </div>
+          )}
+
+          {limitReached && limitKind === 'daily' && (
+            <div className="bg-[var(--surface)] text-[var(--surface-text)] border border-[var(--border)] rounded-2xl p-4 text-center">
+              <p className="mb-3">{limitMessage || 'You have reached your daily AI limit. It resets in 24 hours.'}</p>
+              <button
+                onClick={() => navigate('/')}
+                className="border border-[var(--border)] text-[var(--surface-text)] font-medium px-6 py-2 rounded-full"
+              >
+                Back to Home
               </button>
             </div>
           )}
