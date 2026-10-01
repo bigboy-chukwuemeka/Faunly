@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, ChevronRight, MessageCircle } from 'lucide-react'
+import { Clock, ChevronRight, MessageCircle, PawPrint } from 'lucide-react'
 import { listIdentifications, listConversations } from '../lib/historyApi'
 import BottomNav from '../components/BottomNav'
 
@@ -62,7 +62,18 @@ export default function History() {
 
       <div className="px-6 space-y-3">
         {tab === 'identifications' && identifications.map((item) => (
-          <div key={item.id} className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 flex items-center gap-3">
+          <button
+            key={item.id}
+            onClick={() => navigate(`/identification/${item.id}`)}
+            className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 flex items-center gap-3 text-left"
+          >
+            {item.photo_url ? (
+              <img src={item.photo_url} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+            ) : (
+              <div className="w-12 h-12 rounded-xl bg-[var(--accent-tint)] flex items-center justify-center flex-shrink-0">
+                <PawPrint size={20} className="text-[var(--accent)]" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <p className="font-medium text-[var(--surface-text)] truncate">{item.common_name}</p>
               <p className="text-xs text-[var(--surface-text-muted)] mt-1">
@@ -74,7 +85,7 @@ export default function History() {
                 {CONFIDENCE_LABEL[item.confidence] || item.confidence}
               </span>
             )}
-          </div>
+          </button>
         ))}
 
         {tab === 'conversations' && conversations.map((item) => (

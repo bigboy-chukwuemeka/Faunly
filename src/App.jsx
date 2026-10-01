@@ -6,6 +6,7 @@ import Chat from './pages/Chat'
 import MyAnimals from './pages/MyAnimals'
 import History from './pages/History'
 import ConversationView from './pages/ConversationView'
+import IdentificationDetail from './pages/IdentificationDetail'
 import Profile from './pages/Profile'
 import AddAnimal from './pages/AddAnimal'
 import AnimalProfile from './pages/AnimalProfile'
@@ -56,6 +57,7 @@ function App() {
           <Route path="/animals/:id/add-record" element={<AddHealthRecord />} />
           <Route path="/history" element={<History />} />
           <Route path="/history/:id" element={<ConversationView />} />
+          <Route path="/identification/:id" element={<IdentificationDetail />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/reminders" element={<Reminders />} />

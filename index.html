@@ -9,6 +9,26 @@
   
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>tmp-app</title>
+    <script>
+  window.onerror = function (message, source, lineno, colno, error) {
+    document.body.innerHTML =
+      '<div style="background:#000;color:#0f0;font-family:monospace;padding:16px;white-space:pre-wrap;font-size:12px;">' +
+      'ERROR: ' + message + '\n' +
+      'FILE: ' + source + '\n' +
+      'LINE: ' + lineno + ':' + colno + '\n\n' +
+      (error && error.stack ? error.stack : '') +
+      '</div>';
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function (event) {
+    document.body.innerHTML =
+      '<div style="background:#000;color:#f00;font-family:monospace;padding:16px;white-space:pre-wrap;font-size:12px;">' +
+      'UNHANDLED PROMISE REJECTION:\n' +
+      (event.reason && event.reason.stack ? event.reason.stack : event.reason) +
+      '</div>';
+  });
+</script>
+
   </head>
   <body>
     <div id="root"></div>

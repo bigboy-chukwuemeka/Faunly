@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, PawPrint, MessageCircle, Pencil, Trash2, HeartPulse, Plus, Stethoscope, Syringe, Pill, FileText, X, Bell, ChevronRight } from 'lucide-react'
+import { ArrowLeft, PawPrint, MessageCircle, Pencil, Trash2, HeartPulse, Plus, Stethoscope, Syringe, Pill, FileText, X, Bell, ChevronRight, Clock } from 'lucide-react'
 import { getAnimal, deleteAnimal } from '../lib/animalsApi'
 import { listHealthRecords, deleteHealthRecord } from '../lib/healthRecordsApi'
 import { listReminders } from '../lib/remindersApi'
+import { listAnimalConversations } from '../lib/historyApi'
 import BottomNav from '../components/BottomNav'
 
 const STATUS_STYLE = {
@@ -62,6 +63,9 @@ export default function AnimalProfile() {
   const [loadingRecords, setLoadingRecords] = useState(true)
   const [reminders, setReminders] = useState([])
   const [loadingReminders, setLoadingReminders] = useState(true)
+  const [conversations, setConversations] = useState([])
+  const [loadingConversations, setLoadingConversations] = useState(true)
+  const [openingChat, setOpeningChat] = useState(false)
 
   useEffect(() => {
     getAnimal(id).then((res) => {
@@ -84,6 +88,14 @@ export default function AnimalProfile() {
         setLoadingReminders(false)
       })
     }
+
+    if (tab === 'history') {
+      setLoadingConversations(true)
+      listAnimalConversations(id).then((res) => {
+        if (res.conversations) setConversations(res.conversations)
+        setLoadingConversations(false)
+      })
+    }
   }, [tab, id])
 
   async function handleDelete() {
@@ -98,14 +110,32 @@ export default function AnimalProfile() {
     setHealthRecords((prev) => prev.filter((r) => r.id !== recordId))
   }
 
-  function openChat() {
+  async function openChat() {
+    if (openingChat) return
+    setOpeningChat(true)
+
+    // Resume the animal's existing general conversation if one exists,
+    // rather than always starting a fresh one — this is what makes
+    // reopening this profile show prior chat history.
+    const res = await listAnimalConversations(id)
+    const existingGeneral = (res.conversations || []).find((c) => c.kind === 'general')
+
+    setOpeningChat(false)
+
+    if (existingGeneral) {
+      navigate(`/history/${existingGeneral.id}`)
+      return
+    }
+
     navigate('/chat', {
       state: {
         animal: {
+          id: animal.id,
           common_name: animal.name,
           scientific_name: null,
           facts: { habitat: null, diet: null, behavior: null, conservation_status: null },
         },
+        image: animal.photo_url || null,
       },
     })
   }
@@ -183,9 +213,10 @@ export default function AnimalProfile() {
             )}
             <button
               onClick={openChat}
-              className="w-full flex items-center justify-center gap-2 bg-[var(--accent)] text-[var(--bg)] rounded-full py-3 font-medium"
+              disabled={openingChat}
+              className="w-full flex items-center justify-center gap-2 bg-[var(--accent)] text-[var(--bg)] rounded-full py-3 font-medium disabled:opacity-60"
             >
-              <MessageCircle size={16} /> Ask Faunly about this animal
+              <MessageCircle size={16} /> {openingChat ? 'Opening...' : 'Ask Faunly about this animal'}
             </button>
           </div>
         )}
@@ -287,15 +318,44 @@ export default function AnimalProfile() {
         )}
 
         {tab === 'history' && (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 text-center">
-            <p className="text-sm text-[var(--surface-text-muted)]">
-              No history recorded for {animal.name} yet.
-            </p>
+          <div className="space-y-2">
+            {loadingConversations ? (
+              <p className="text-sm text-[var(--text-muted)]">Loading...</p>
+            ) : conversations.length === 0 ? (
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 text-center">
+                <p className="text-sm text-[var(--surface-text-muted)]">
+                  No history recorded for {animal.name} yet.
+                </p>
+              </div>
+            ) : (
+              conversations.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => navigate(`/history/${c.id}`)}
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 flex items-center gap-3 text-left"
+                >
+                  <div className="w-9 h-9 rounded-full bg-[var(--accent-tint)] flex items-center justify-center flex-shrink-0">
+                    {c.kind === 'health' ? (
+                      <HeartPulse size={16} className="text-[var(--accent)]" />
+                    ) : (
+                      <MessageCircle size={16} className="text-[var(--accent)]" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-[var(--surface-text)] truncate">{c.title}</p>
+                    <p className="text-xs text-[var(--surface-text-muted)] truncate mt-1">
+                      {c.last_message || 'No messages yet'}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} className="text-[var(--surface-text-muted)] flex-shrink-0" />
+                </button>
+              ))
+            )}
           </div>
         )}
 
         {tab === 'more' && (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl divide-y divide-[var(--border)]">
+          <div className="bg-[var(--surface)] border border-[var(--border)] divide-y divide-[var(--border)]">
             <button
               onClick={() => navigate('/add-animal', { state: { editAnimal: animal } })}
               className="w-full flex items-center gap-3 p-4 text-left"

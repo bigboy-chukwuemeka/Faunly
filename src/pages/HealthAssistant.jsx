@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, NavLink } from 'react-router-dom'
 import { ArrowLeft, Leaf, Send, Home, Camera, PawPrint, Clock, User, ImagePlus, X, Stethoscope, HeartPulse, Pill, ShieldPlus, ClipboardList, Bot } from 'lucide-react'
 import { getAnimal } from '../lib/animalsApi'
+import { listAnimalConversations, getConversation } from '../lib/historyApi'
 import { getGuestSessionId } from '../lib/guestSession'
 import { getAuthHeader } from '../lib/auth'
 
@@ -59,9 +60,21 @@ export default function HealthAssistant() {
   const bottomRef = useRef(null)
 
   useEffect(() => {
-    getAnimal(id).then((res) => {
+    getAnimal(id).then(async (res) => {
       if (res.animal) setAnimal(res.animal)
       setLoading(false)
+
+      // Resume this animal's existing health conversation, if one exists,
+      // instead of always starting blank.
+      const convosRes = await listAnimalConversations(id)
+      const existingHealth = (convosRes.conversations || []).find((c) => c.kind === 'health')
+      if (existingHealth) {
+        const convoRes = await getConversation(existingHealth.id)
+        if (convoRes.conversation && convoRes.messages) {
+          setConversationId(existingHealth.id)
+          setMessages(convoRes.messages.map((m) => ({ role: m.role, content: m.content })))
+        }
+      }
     })
   }, [id])
 

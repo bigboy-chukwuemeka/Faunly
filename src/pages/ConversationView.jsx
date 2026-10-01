@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, NavLink } from 'react-router-dom'
-import { ArrowLeft, Send, Home, Camera, PawPrint, Clock, User, ImagePlus, X, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Send, Home, Camera, PawPrint, Clock, User, ImagePlus, X, RefreshCw, Leaf } from 'lucide-react'
 import { getConversation } from '../lib/historyApi'
 import { getGuestSessionId } from '../lib/guestSession'
 import { getAuthHeader } from '../lib/auth'
@@ -54,8 +54,6 @@ export default function ConversationView() {
   const [limitReached, setLimitReached] = useState(false)
   const [limitKind, setLimitKind] = useState(null) // 'guest' | 'daily'
   const [limitMessage, setLimitMessage] = useState('')
-  // Holds the exact message array that failed to send, so "Try Again" can
-  // replay it verbatim instead of the user having to retype anything.
   const [pendingRetry, setPendingRetry] = useState(null)
   const bottomRef = useRef(null)
 
@@ -100,6 +98,7 @@ export default function ConversationView() {
           task: 'chat',
           guest_session_id: getGuestSessionId(),
           animal: { common_name: conversation.title, facts: {} },
+          animal_id: conversation.animal_id || undefined,
           messages: newMessages.map(({ imagePreview, isError, ...m }) => m),
           conversation_id: id,
         }),
@@ -110,11 +109,6 @@ export default function ConversationView() {
     return { res, data }
   }
 
-  // Single attempt only, same reasoning as Chat.jsx: no automatic retry,
-  // since aborting the client fetch does not stop the server from
-  // finishing the job, so retrying automatically risks a duplicate Gemini
-  // call and a duplicate credit deduction. Failures are surfaced with a
-  // manual "Try Again" that replays the exact same message array.
   async function performSend(newMessages) {
     setSending(true)
     setPendingRetry(null)
@@ -203,6 +197,13 @@ export default function ConversationView() {
         <button onClick={() => navigate('/history')} className="w-9 h-9 rounded-full bg-[var(--surface-secondary)] border border-[var(--border)] flex items-center justify-center">
           <ArrowLeft size={18} />
         </button>
+        {conversation.photo_url ? (
+          <img src={conversation.photo_url} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
+        ) : (
+          <div className="w-10 h-10 rounded-xl bg-[var(--accent-tint)] flex items-center justify-center flex-shrink-0">
+            <Leaf size={18} className="text-[var(--accent)]" />
+          </div>
+        )}
         <p className="font-display text-lg">{conversation.title}</p>
       </div>
 

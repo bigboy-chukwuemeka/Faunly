@@ -60,6 +60,7 @@ export default function Chat() {
   const navigate = useNavigate()
   const animal = location.state?.animal
   const animalImage = location.state?.image
+  const sourceConversationId = location.state?.sourceConversationId || null
 
   const [messages, setMessages] = useState(() =>
     animal?.hook ? [{ role: 'assistant', content: animal.hook }] : []
@@ -72,9 +73,6 @@ export default function Chat() {
   const [limitKind, setLimitKind] = useState(null) // 'guest' | 'daily'
   const [limitMessage, setLimitMessage] = useState('')
   const [conversationId, setConversationId] = useState(null)
-  // Holds the exact message array that failed to send, so "Try Again" can
-  // replay it verbatim instead of the user having to retype anything.
-  // null means there is no failed send currently pending retry.
   const [pendingRetry, setPendingRetry] = useState(null)
   const bottomRef = useRef(null)
 
@@ -120,6 +118,11 @@ export default function Chat() {
           task: 'chat',
           guest_session_id: getGuestSessionId(),
           animal,
+          animal_id: animal?.id || undefined,
+          // Only meaningful on the very first message of a brand new
+          // conversation (conversationId is still null) — lets the server
+          // carry a fresh identification's photo over to this chat.
+          source_conversation_id: conversationId ? undefined : sourceConversationId || undefined,
           messages: newMessages.map(({ imagePreview, isError, ...m }) => m),
           conversation_id: conversationId,
         }),
@@ -130,13 +133,6 @@ export default function Chat() {
     return { res, data }
   }
 
-  // Single attempt only. On failure, we surface the error as a message
-  // bubble and store the exact `newMessages` array in pendingRetry so the
-  // user can retry with one tap via retryLastMessage() below, without
-  // retyping anything. We never fire a second real request automatically —
-  // aborting the client fetch on timeout does not stop the server, so an
-  // automatic retry risks a duplicate Gemini call and a duplicate credit
-  // deduction for the same message.
   async function performSend(newMessages) {
     setSending(true)
     setPendingRetry(null)
@@ -172,9 +168,6 @@ export default function Chat() {
         content: `⚠️ ${data.error || 'Something went wrong. Try again?'}`,
         isError: true,
       }])
-      // A 429 means Gemini's quota is exhausted — retrying immediately
-      // would just fail again and waste another attempt, so we don't
-      // offer a retry for that case specifically.
       if (!isQuotaError) setPendingRetry(newMessages)
       setSending(false)
       return
@@ -206,8 +199,6 @@ export default function Chat() {
 
   function retryLastMessage() {
     if (!pendingRetry || sending) return
-    // Strip the error bubble we appended after the failed attempt, then
-    // resend the exact same message array that failed.
     setMessages((prev) => prev.filter((m) => !m.isError))
     performSend(pendingRetry)
   }

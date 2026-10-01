@@ -20,8 +20,16 @@ export function listIdentifications() {
   return callFunction({ task: 'list_identifications' })
 }
 
+export function getIdentification(conversationId) {
+  return callFunction({ task: 'get_identification', conversation_id: conversationId })
+}
+
 export function listConversations() {
   return callFunction({ task: 'list_conversations' })
+}
+
+export function listAnimalConversations(animalId) {
+  return callFunction({ task: 'list_animal_conversations', animal_id: animalId })
 }
 
 export function getConversation(conversationId) {
