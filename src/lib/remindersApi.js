@@ -40,6 +40,7 @@ export function completeReminder(reminder_id) {
   return call('complete_reminder', { reminder_id })
 }
 
-export function deleteReminder(reminder_id) {
-  return call('delete_reminder', { reminder_id })
+// scope: 'this' (just this reminder) or 'series' (this and all its repeats)
+export function deleteReminder(reminder_id, scope = 'this') {
+  return call('delete_reminder', { reminder_id, scope })
 }

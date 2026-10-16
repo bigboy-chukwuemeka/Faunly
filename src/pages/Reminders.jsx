@@ -6,6 +6,9 @@ import {
 } from 'lucide-react'
 import { listReminders, completeReminder } from '../lib/remindersApi'
 import BottomNav from '../components/BottomNav'
+import FollowUpCard from '../components/FollowUpCard'
+import { noteFromReminder, saveReminderAsNote } from '../lib/reminderNotes'
+import { collapseSeries, repeatPhrase } from '../lib/reminderSeries'
 
 const TYPE_ICON = {
   vaccination: <Syringe size={18} />,
@@ -23,6 +26,18 @@ const TYPE_LABEL = {
   follow_up: 'Follow-up Reminder',
   weight_check: 'Weight Check',
   custom: 'Reminder',
+}
+
+// Turns whatever came back (string, Error, object) into readable text.
+function errorText(err) {
+  if (!err) return 'Unknown error (no details were returned).'
+  if (typeof err === 'string') return err
+  if (err.message) return err.message
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return 'Unknown error (could not read the error details).'
+  }
 }
 
 function daysUntil(dateStr) {
@@ -78,6 +93,10 @@ export default function Reminders() {
   const [tab, setTab] = useState('upcoming')
   const [reminders, setReminders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+  const [actionError, setActionError] = useState(null)
+  // The reminder that was just marked done, when we are offering to save it as a note.
+  const [askSaveFor, setAskSaveFor] = useState(null)
 
   useEffect(() => {
     loadReminders()
@@ -85,21 +104,42 @@ export default function Reminders() {
 
   async function loadReminders() {
     setLoading(true)
+    setLoadError(null)
     const status = tab === 'all' ? 'all' : tab === 'upcoming' ? 'pending' : 'completed'
-    const res = await listReminders({ status })
-    if (res.reminders) {
-      setReminders(res.reminders)
+    try {
+      const res = await listReminders({ status })
+      if (res.error) {
+        setLoadError(errorText(res.error))
+      } else if (res.reminders) {
+        setReminders(res.reminders)
+      } else {
+        setLoadError('Unexpected response while loading reminders: no "reminders" field came back.')
+      }
+    } catch (e) {
+      setLoadError(errorText(e))
     }
     setLoading(false)
   }
 
-  async function handleMarkDone(e, id) {
+  async function handleMarkDone(e, reminder) {
     e.stopPropagation()
-    await completeReminder(id)
+    setActionError(null)
+    try {
+      const res = await completeReminder(reminder.id)
+      if (res.error) {
+        setActionError(`Could not mark this reminder as done: ${errorText(res.error)}`)
+        return
+      }
+    } catch (err) {
+      setActionError(`Could not mark this reminder as done: ${errorText(err)}`)
+      return
+    }
+    setAskSaveFor(noteFromReminder(reminder) ? reminder : null)
     loadReminders()
   }
 
-  const filtered = reminders.filter((r) => {
+  // A repeating reminder shows as one card (its soonest one), not one card per day or week.
+  const filtered = collapseSeries(reminders).filter((r) => {
     if (tab === 'upcoming') return r.status === 'pending'
     if (tab === 'past') return r.status === 'completed' || r.status === 'dismissed'
     return true
@@ -145,7 +185,28 @@ export default function Reminders() {
 
       {/* List */}
       <div className="px-6 space-y-3">
-        {loading ? (
+        {actionError && (
+          <p className="text-sm text-[var(--error)] break-words">{actionError}</p>
+        )}
+
+        {askSaveFor && (
+          <FollowUpCard
+            key={askSaveFor.id}
+            question={`Save this in ${askSaveFor.animals?.name || 'the animal'}'s notes?`}
+            detail={askSaveFor.title}
+            yesLabel="Yes, save it"
+            onYes={() => saveReminderAsNote(askSaveFor)}
+            successText={`Saved in ${askSaveFor.animals?.name || 'the animal'}'s notes.`}
+            onClose={() => setAskSaveFor(null)}
+          />
+        )}
+
+        {loadError ? (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4">
+            <p className="text-sm font-medium text-[var(--error)]">Could not load reminders</p>
+            <p className="text-sm text-[var(--error)] mt-1 break-words">{loadError}</p>
+          </div>
+        ) : loading ? (
           <div className="text-center py-12 text-[var(--text-muted)] text-sm">
             Loading reminders...
           </div>
@@ -188,9 +249,9 @@ export default function Reminders() {
                         <p className="font-medium text-[var(--surface-text)]">
                           {r.title || typeLabel}
                         </p>
-                        {r.description && (
+                        {(r.description || repeatPhrase(r)) && (
                           <p className="text-sm text-[var(--surface-text-muted)] mt-0.5">
-                            {r.description}
+                            {[r.description, repeatPhrase(r)].filter(Boolean).join(' · ')}
                           </p>
                         )}
                       </div>
@@ -218,7 +279,7 @@ export default function Reminders() {
 
                       {r.status === 'pending' && (
                         <button
-                          onClick={(e) => handleMarkDone(e, r.id)}
+                          onClick={(e) => handleMarkDone(e, r)}
                           className="text-xs font-medium text-[var(--accent)] flex items-center gap-1"
                         >
                           Mark done

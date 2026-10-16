@@ -5,6 +5,7 @@ import { getAnimal } from '../lib/animalsApi'
 import { listAnimalConversations, getConversation } from '../lib/historyApi'
 import { getGuestSessionId } from '../lib/guestSession'
 import { getAuthHeader } from '../lib/auth'
+import Disclaimer from '../components/Disclaimer'
 
 const SEVERITY_STYLES = {
   monitor: { label: '⚠️ Worth keeping an eye on', color: 'text-[var(--accent)]' },
@@ -309,6 +310,8 @@ export default function HealthAssistant() {
             <p className="text-xs text-[var(--text-muted)]">Photo ready to send</p>
           </div>
         )}
+
+        <Disclaimer className="px-4 pt-2" />
 
         <div className="flex items-center gap-2 px-4 py-3 border-t border-[var(--border)]">
           <label className="w-11 h-11 flex-shrink-0 rounded-full bg-[var(--surface-secondary)] border border-[var(--border)] flex items-center justify-center cursor-pointer text-[var(--surface-text)]">
