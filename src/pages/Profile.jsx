@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, User, Crown, CreditCard, Palette, Bell, Globe,
+  ArrowLeft, User, Crown, CreditCard, Palette, Globe,
   ShieldCheck, HelpCircle, FileText, Info, ChevronRight, LogOut, Camera,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { signOut } from '../lib/auth'
 import { uploadAvatar } from '../lib/profileApi'
 import BottomNav from '../components/BottomNav'
+import NotificationsRow from '../components/NotificationsRow'
 
 export default function Profile() {
   const navigate = useNavigate()
@@ -97,7 +98,7 @@ export default function Profile() {
 
       <Section title="App Preferences">
         <Row icon={<Palette size={18} />} label="Theme" sub="Dark (only option for now)" />
-        <Row icon={<Bell size={18} />} label="Notifications" sub="Coming soon" locked />
+        <NotificationsRow />
         <Row icon={<Globe size={18} />} label="Language" sub="English" />
         <Row icon={<ShieldCheck size={18} />} label="Privacy & Security" sub="Coming soon" locked />
       </Section>
