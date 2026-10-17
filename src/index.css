@@ -26,6 +26,9 @@
   --activity-bg: #E9E2D0;
   --activity-text: #2A2418;
   --activity-text-muted: #6B6250;
+
+  /* How wide the app column is on a computer. Phones always use the full width. */
+  --app-width: 480px;
 }
 
 .dark {
@@ -51,8 +54,44 @@
   --activity-text-muted: #6B6250;
 }
 
-body {
+/* The page behind the app column. The column itself (#root) carries the app colour. */
+html {
   background-color: var(--bg);
+}
+
+body {
+  background-color: transparent;
   color: var(--text);
   font-family: var(--font-sans);
+}
+
+/* The app sits in one centred column, like a phone screen. */
+#root {
+  width: 100%;
+  max-width: var(--app-width);
+  margin: 0 auto;
+  min-height: 100vh;
+  background-color: var(--bg);
+}
+
+/* Only on wider screens (computers and tablets): frame the column and keep the
+   pinned bars (the bottom menu and the chat typing bar) inside it. */
+@media (min-width: 481px) {
+  html {
+    background-color: color-mix(in srgb, var(--bg) 65%, black);
+  }
+
+  #root {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    box-shadow: 0 0 48px rgba(0, 0, 0, 0.45);
+  }
+
+  .fixed.bottom-0.left-0.right-0 {
+    left: 50%;
+    right: auto;
+    width: 100%;
+    max-width: var(--app-width);
+    transform: translateX(-50%);
+  }
 }
