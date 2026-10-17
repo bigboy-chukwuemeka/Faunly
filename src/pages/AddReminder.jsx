@@ -588,10 +588,7 @@ export default function AddReminder() {
 
         {/* 5. Notify me (pick as many as you like) */}
         <div>
-          <Label>
-            Notify me{' '}
-            <span className="ml-1 text-xs border border-[var(--border)] rounded-full px-2 py-0.5">not active yet</span>
-          </Label>
+          <Label>Notify me</Label>
           <div className="flex flex-wrap gap-2">
             {NOTIFY_CHIPS.map((n) => (
               <Chip key={n.value} selected={notify.includes(n.value)} onClick={() => toggleNotify(n.value)}>
@@ -599,7 +596,7 @@ export default function AddReminder() {
               </Chip>
             ))}
           </div>
-          <Hint>Your choice is saved, ready for when phone notifications are switched on.</Hint>
+          <Hint>You get these on devices where notifications are turned on (Profile, then Notifications).</Hint>
         </div>
 
         {/* 6. Notes */}

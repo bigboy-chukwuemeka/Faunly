@@ -399,7 +399,7 @@ export default function ReminderDetail() {
 
         {notifyChoices.length > 0 && (
           <p className="text-xs text-[var(--text-muted)] px-1">
-            Your notify choices are saved. Phone notifications are not switched on yet.
+            You get these on devices where notifications are turned on (Profile, then Notifications).
           </p>
         )}
 
